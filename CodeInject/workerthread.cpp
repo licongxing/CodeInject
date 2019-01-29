@@ -24,26 +24,27 @@ DWORD WINAPI CodeFunc(LPVOID param)
     typedef char*(*Mystrcat)(char *dest, const char *src);
 
 
+    // 获取函数地址
     MyLoadLibrary myLoadLibrary = (MyLoadLibrary)data->dwLoadLibrary;
     MyGetProcAddress myGetProcAddress = (MyGetProcAddress)data->dwGetProcAddress;
     MyGetModuleFileName myGetModuleFileName = (MyGetModuleFileName)data->dwGetModuleFileName;
     MyGetModuleHandle myGetModuleHandle = (MyGetModuleHandle)data->dwGetModuleHandle;
-
-
     // 所有用的函数，都需像下面一样 导出函数地址然后再使用，包括标准库函数也一样
     // 笔者刚开始就犯了一个错，直接使用sprintf、strcat 等函数，这样是不行！因为我们自己注入的代码，函数地址需要我们自己确定！
     HMODULE user32dll = myLoadLibrary(data->user32dll);
-    HMODULE msvcrtdll = myGetModuleHandle(data->msvcrtdll);// msvcrtdll 标准库一般都有 直接获取
+    HMODULE msvcrtdll = myGetModuleHandle(data->msvcrtdll);// msvcrt.dll 微软运行库，可直接获取
     MyMessageBox myMessageBox = (MyMessageBox)myGetProcAddress(user32dll,data->MessageBoxFun);
     Mystrcat mystrcat = (Mystrcat)myGetProcAddress(msvcrtdll,data->strcatFun);
+
+
+    // 调用获取到的函数
     char curFile[MAX_PATH] = {0};
     myGetModuleFileName(NULL,curFile,MAX_PATH);
-
-    //mystrcat(data->content,curFile);
+    mystrcat(data->content,curFile);
     myMessageBox(NULL, data->content ,data->caption, MB_OK);
     return 0;
 }
-// 注入Code
+// 注入Code操作
 void WorkerThread::injectCode()
 {
     HANDLE targetProc = OpenProcess(PROCESS_ALL_ACCESS,FALSE,m_pId);
@@ -55,9 +56,11 @@ void WorkerThread::injectCode()
 
     MyData data = {0};
     strcpy(data.user32dll,"user32.dll");
+    strcpy(data.msvcrtdll,"msvcrt.dll");
     strcpy(data.MessageBoxFun,"MessageBoxA");
+    strcpy(data.strcatFun,"strcat");
     strcpy(data.caption,"Inject Code!");
-    strcpy(data.content,"current process:");
+    strcpy(data.content,"current process:");// 这里使用中文会乱码
 
     HMODULE module = GetModuleHandleA("kernel32.dll");
     data.dwLoadLibrary = (DWORD)GetProcAddress(module,"LoadLibraryA");
@@ -66,7 +69,7 @@ void WorkerThread::injectCode()
     data.dwGetModuleHandle = (DWORD)GetProcAddress(module,"GetModuleHandleA");
     int dataLen = sizeof(MyData);
 
-    // 1.目标进程申请空间 存放data数据，也就是可执行代码函数的参数
+    // 1.目标进程申请空间 存放data数据，也就是注入的 可执行代码函数 的参数
     LPVOID pData = VirtualAllocEx(targetProc,NULL,dataLen,MEM_COMMIT | MEM_RESERVE,PAGE_READWRITE );
     if( pData == NULL )
     {
@@ -81,7 +84,8 @@ void WorkerThread::injectCode()
     }
 
     // 2.目标进程申请空间 存放CodeFunc可执行代码
-    int codeLen = 0x4000;
+    int codeLen = 0x4000; // 4 * 16^3 = 16KB足够了
+    // 第5个参数，数据具有可执行权限
     LPVOID pCode = VirtualAllocEx(targetProc,NULL,codeLen,MEM_COMMIT,PAGE_EXECUTE_READWRITE );
     if( pCode == NULL )
     {

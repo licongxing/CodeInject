@@ -15,22 +15,32 @@ void WorkerThread::run()
 DWORD WINAPI CodeFunc(LPVOID param)
 {
     MyData* data = (MyData*)param;
+    // 定义函数指针类型 方便下面的类型转换
     typedef HMODULE (__stdcall *MyLoadLibrary)(LPCSTR);
     typedef FARPROC (__stdcall *MyGetProcAddress)(HMODULE,LPCSTR);
     typedef DWORD (__stdcall *MyGetModuleFileName)(HMODULE,LPSTR,DWORD);
+    typedef HMODULE (*MyGetModuleHandle)(LPCSTR);
     typedef int (__stdcall *MyMessageBox)(HWND,LPCSTR,LPCSTR,UINT);
+    typedef char*(*Mystrcat)(char *dest, const char *src);
+
+
     MyLoadLibrary myLoadLibrary = (MyLoadLibrary)data->dwLoadLibrary;
     MyGetProcAddress myGetProcAddress = (MyGetProcAddress)data->dwGetProcAddress;
     MyGetModuleFileName myGetModuleFileName = (MyGetModuleFileName)data->dwGetModuleFileName;
+    MyGetModuleHandle myGetModuleHandle = (MyGetModuleHandle)data->dwGetModuleHandle;
 
+
+    // 所有用的函数，都需像下面一样 导出函数地址然后再使用，包括标准库函数也一样
+    // 笔者刚开始就犯了一个错，直接使用sprintf、strcat 等函数，这样是不行！因为我们自己注入的代码，函数地址需要我们自己确定！
     HMODULE user32dll = myLoadLibrary(data->user32dll);
+    HMODULE msvcrtdll = myGetModuleHandle(data->msvcrtdll);// msvcrtdll 标准库一般都有 直接获取
     MyMessageBox myMessageBox = (MyMessageBox)myGetProcAddress(user32dll,data->MessageBoxFun);
+    Mystrcat mystrcat = (Mystrcat)myGetProcAddress(msvcrtdll,data->strcatFun);
     char curFile[MAX_PATH] = {0};
     myGetModuleFileName(NULL,curFile,MAX_PATH);
-    char tmp[MAX_PATH] = {0};
-    sprintf_s(tmp,"当前进程：%s",curFile);
-    myMessageBox(NULL,"aaa","bbb",MB_OK);
-    //myMessageBox(NULL,data->msg,tmp,MB_OK);
+
+    //mystrcat(data->content,curFile);
+    myMessageBox(NULL, data->content ,data->caption, MB_OK);
     return 0;
 }
 // 注入Code
@@ -42,14 +52,18 @@ void WorkerThread::injectCode()
         qDebug() << "OpenProcess error";
         return;
     }
+
     MyData data = {0};
     strcpy(data.user32dll,"user32.dll");
     strcpy(data.MessageBoxFun,"MessageBoxA");
-    strcpy(data.msg,"Inject Code!");
-    HMODULE module = LoadLibraryA("kernel32.dll");
+    strcpy(data.caption,"Inject Code!");
+    strcpy(data.content,"current process:");
+
+    HMODULE module = GetModuleHandleA("kernel32.dll");
     data.dwLoadLibrary = (DWORD)GetProcAddress(module,"LoadLibraryA");
     data.dwGetProcAddress = (DWORD)GetProcAddress(module,"GetProcAddress");
     data.dwGetModuleFileName = (DWORD)GetProcAddress(module,"GetModuleFileNameA");
+    data.dwGetModuleHandle = (DWORD)GetProcAddress(module,"GetModuleHandleA");
     int dataLen = sizeof(MyData);
 
     // 1.目标进程申请空间 存放data数据，也就是可执行代码函数的参数
@@ -84,6 +98,7 @@ void WorkerThread::injectCode()
     // 3.创建远程线程 执行可执行代码
     HANDLE tHandle = CreateRemoteThread(targetProc,NULL,NULL,
                        (LPTHREAD_START_ROUTINE)pCode,pData,NULL,NULL);
+
     if(tHandle == NULL)
     {
         qDebug() << "CreateRemoteThread error";

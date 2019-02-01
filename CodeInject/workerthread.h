@@ -15,7 +15,7 @@ typedef struct _mydata{
     char user32dll[STRLEN]; // user32.dll 含有MessageBoxA函数
     char MessageBoxFun[STRLEN]; // "MessageBoxA" 字符串
 
-    char msvcrtdll[STRLEN]; // MSVCRT.DLL 微软运行库 含有strcat函数，记住所有的 函数都需通过这种方式进行导出 然后才能使用
+    char msvcrtdll[STRLEN]; // MSVCRT.DLL 微软运行库 含有strcat函数
     char strcatFun[STRLEN]; // "strcat" 字符串
 
     char caption[STRLEN]; // 消息框标题 "Inject Code!"
